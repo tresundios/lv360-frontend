@@ -1,0 +1,264 @@
+///////////////////////////////////////////////////////////////////////////////
+// Jenkinsfile.frontend — React (Vite) CI/CD Pipeline
+// Triggers on PR merge to dev, or manual trigger
+///////////////////////////////////////////////////////////////////////////////
+
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        timestamps()
+    }
+
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['dev', 'qa', 'uat', 'prod'],
+            description: 'Target deployment environment'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip test stage (emergency deploys only)'
+        )
+    }
+
+    environment {
+        DOCKER_REGISTRY    = 'docker.io'
+        DOCKER_REPO        = 'navistresundios/lamviec360-frontend'
+        IMAGE_TAG           = "${params.TARGET_ENV}-${BUILD_NUMBER}"
+        IMAGE_FULL          = "${DOCKER_REGISTRY}/${DOCKER_REPO}:${IMAGE_TAG}"
+        IMAGE_LATEST        = "${DOCKER_REGISTRY}/${DOCKER_REPO}:${params.TARGET_ENV}-latest"
+
+        // Jenkins credentials IDs — configure in Jenkins Credentials Store
+        DOCKER_CREDENTIALS  = 'dockerhub-credentials'
+        SSH_CREDENTIALS     = "ssh-${params.TARGET_ENV}-server"
+
+        // Deploy hosts per environment
+        DEPLOY_HOST_dev     = '103.175.146.37'
+        DEPLOY_HOST_qa      = '${QA_SERVER_IP}'     // TODO: set when QA server is provisioned
+        DEPLOY_HOST_uat     = '${UAT_SERVER_IP}'    // TODO: set when UAT server is provisioned
+        DEPLOY_HOST_prod    = '${PROD_SERVER_IP}'   // TODO: set when prod server is provisioned
+
+        // Paths on remote server
+        REMOTE_PROJECT_DIR  = '/opt/lamviec360'
+        COMPOSE_FILE        = "docker-compose.${params.TARGET_ENV}.yml"
+    }
+
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        // ---------------------------------------------------------------------
+        // Stage 1: Checkout
+        // ---------------------------------------------------------------------
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+                    env.GIT_BRANCH_NAME = sh(
+                        script: 'git rev-parse --abbrev-ref HEAD',
+                        returnStdout: true
+                    ).trim()
+                    echo "Building commit ${env.GIT_COMMIT_SHORT} on branch ${env.GIT_BRANCH_NAME}"
+
+                    // Path-based trigger: skip if no frontend-relevant files changed
+                    def changedFiles = sh(
+                        script: 'git diff --name-only HEAD~1 HEAD || echo ""',
+                        returnStdout: true
+                    ).trim()
+                    echo "Changed files:\n${changedFiles}"
+
+                    def frontendRelevant = changedFiles.split('\n').any { file ->
+                        file.startsWith('frontend/') ||
+                        file.startsWith('docker-compose') ||
+                        file.startsWith('env/') ||
+                        file.startsWith('jenkins/Jenkinsfile.frontend')
+                    }
+
+                    if (!frontendRelevant && changedFiles != '') {
+                        echo "No frontend-relevant files changed. Skipping pipeline."
+                        env.SKIP_PIPELINE = 'true'
+                    } else {
+                        env.SKIP_PIPELINE = 'false'
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Stage 2: Install & Lint
+        // ---------------------------------------------------------------------
+        stage('Install & Lint') {
+            when {
+                expression { return env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                dir('frontend') {
+                    sh '''
+                        docker build \
+                            -f - \
+                            -t lv360-frontend-lint:${BUILD_NUMBER} . <<'DOCKERFILE'
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --prefer-offline --no-audit
+COPY . .
+DOCKERFILE
+
+                        docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run lint
+                        docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run format:check
+                    '''
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Stage 3: Run Tests
+        // ---------------------------------------------------------------------
+        stage('Test') {
+            when {
+                allOf {
+                    expression { return !params.SKIP_TESTS }
+                    expression { return env.SKIP_PIPELINE != 'true' }
+                }
+            }
+            steps {
+                dir('frontend') {
+                    sh '''
+                        docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run test:ci
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: '**/test-results.xml'
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Stage 4: Docker Build
+        // ---------------------------------------------------------------------
+        stage('Docker Build') {
+            when {
+                expression { return env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                dir('frontend') {
+                    script {
+                        // VITE vars per environment (public — baked into JS bundle)
+                        def viteConfig = [
+                            dev:  [apiUrl: 'https://dev.lamviec360.com',  env: 'development'],
+                            qa:   [apiUrl: 'https://qa.lamviec360.com',   env: 'qa'],
+                            uat:  [apiUrl: 'https://uat.lamviec360.com',  env: 'uat'],
+                            prod: [apiUrl: 'https://api.lamviec360.com',  env: 'production'],
+                        ]
+                        def cfg = viteConfig[params.TARGET_ENV] ?: viteConfig.dev
+
+                        sh """
+                            docker build \
+                                -f Dockerfile.prod \
+                                --build-arg VITE_API_URL=${cfg.apiUrl} \
+                                --build-arg VITE_ENVIRONMENT=${cfg.env} \
+                                --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                                -t ${IMAGE_FULL} \
+                                -t ${IMAGE_LATEST} \
+                                .
+                        """
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Stage 5: Docker Push to Registry
+        // ---------------------------------------------------------------------
+        stage('Docker Push') {
+            when {
+                expression { return env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: env.DOCKER_CREDENTIALS,
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+                    sh """
+                        echo "\${DOCKER_PASS}" | docker login ${DOCKER_REGISTRY} -u "\${DOCKER_USER}" --password-stdin
+                        docker push ${IMAGE_FULL}
+                        docker push ${IMAGE_LATEST}
+                        docker logout ${DOCKER_REGISTRY}
+                    """
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Stage 6: Deploy to Remote Server
+        // ---------------------------------------------------------------------
+        stage('Deploy') {
+            when {
+                expression { return env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                sshagent(credentials: [env.SSH_CREDENTIALS]) {
+                    sh """
+                        DEPLOY_HOST=\$(eval echo \${DEPLOY_HOST_${params.TARGET_ENV}})
+                        ssh -o StrictHostKeyChecking=no deploy@\${DEPLOY_HOST} << 'ENDSSH'
+                            cd ${REMOTE_PROJECT_DIR}
+
+                            # Pull latest compose files and configs from git
+                            git pull origin ${params.TARGET_ENV} || true
+
+                            # Pull new image
+                            docker pull ${IMAGE_FULL}
+
+                            # Update the env file with new image tag
+                            sed -i 's|DOCKER_IMAGE_TAG=.*|DOCKER_IMAGE_TAG=${IMAGE_TAG}|' env/.env.${params.TARGET_ENV}
+
+                            # Export env vars so docker compose interpolation can read them
+                            set -a
+                            source env/.env.${params.TARGET_ENV}
+                            set +a
+
+                            # Graceful rolling restart — only the react service
+                            docker compose -f ${COMPOSE_FILE} up -d --no-deps --force-recreate react
+
+                            # Wait and verify
+                            echo "Waiting for health check..."
+                            # Wait for container to be healthy with retry
+                            timeout 60 bash -c 'until curl -f http://localhost:3080/ >/dev/null 2>&1; do sleep 2; done'
+                            echo "Frontend deployment successful!"
+ENDSSH
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Frontend pipeline SUCCESS: ${IMAGE_FULL}"
+        }
+        failure {
+            echo "❌ Frontend pipeline FAILED at stage: ${env.STAGE_NAME}"
+        }
+        cleanup {
+            sh """
+                docker rmi ${IMAGE_FULL} ${IMAGE_LATEST} 2>/dev/null || true
+                docker rmi lv360-frontend-lint:${BUILD_NUMBER} 2>/dev/null || true
+            """
+        }
+    }
+}

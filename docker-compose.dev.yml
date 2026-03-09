@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  frontend:
+    image: navistresundios/lamviec360-frontend:dev-latest
+    container_name: lv360_frontend_dev
+    restart: always
+    ports:
+      - "3080:80"
+    environment:
+      - VITE_API_URL=https://dev.lamviec360.com
+      - VITE_ENVIRONMENT=development
+    networks:
+      - frontend-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+networks:
+  frontend-network:
+    driver: bridge
+    name: lv360-frontend-network
