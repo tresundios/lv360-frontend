@@ -79,14 +79,16 @@ pipeline {
                     echo "Changed files:\n${changedFiles}"
 
                     def frontendRelevant = changedFiles.split('\n').any { file ->
-                        file.startsWith('src/') ||
+                        file.startsWith('frontend/src/') ||
                         file.startsWith('frontend/') ||
                         file.startsWith('docker-compose') ||
                         file.startsWith('env/') ||
                         file.startsWith('jenkins/') ||
                         file.startsWith('Jenkinsfile') ||
-                        file == 'package.json' ||
-                        file == 'package-lock.json'
+                        file == 'frontend/package.json' ||
+                        file == 'frontend/package-lock.json' ||
+                        file == '.env.dev' ||
+                        file == '.env.local'
                     }
 
                     if (!frontendRelevant && changedFiles != '') {
@@ -107,7 +109,7 @@ pipeline {
                 expression { return env.SKIP_PIPELINE != 'true' }
             }
             steps {
-                dir('.') {
+                dir('frontend') {
                     sh '''
                         docker build \
                             -f - \
@@ -137,7 +139,7 @@ DOCKERFILE
                 }
             }
             steps {
-                dir('.') {
+                dir('frontend') {
                     sh '''
                         docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run test:ci
                     '''
@@ -145,7 +147,7 @@ DOCKERFILE
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: '**/test-results.xml'
+                    junit allowEmptyResults: true, testResults: 'frontend/**/test-results.xml'
                 }
             }
         }

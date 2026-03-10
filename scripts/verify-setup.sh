@@ -87,7 +87,7 @@ else
 fi
 
 # Check Jenkinsfile for directory references
-if grep -q "dir('.')" Jenkinsfile.frontend; then
+if grep -q "dir('frontend')" Jenkinsfile.frontend; then
     echo "✅ Jenkinsfile.frontend has correct directory references"
 else
     echo "❌ Jenkinsfile.frontend has incorrect directory references"
