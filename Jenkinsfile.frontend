@@ -44,8 +44,9 @@ pipeline {
         DEPLOY_HOST_prod    = '${PROD_SERVER_IP}'   // TODO: set when prod server is provisioned
 
         // Paths on remote server
-        REMOTE_PROJECT_DIR  = '/opt/lamviec360'
+        REMOTE_PROJECT_DIR  = '/opt/lamviec360-frontend'
         COMPOSE_FILE        = "docker-compose.${params.TARGET_ENV}.yml"
+        NGINX_CONFIG_FILE   = "nginx/default.conf"
     }
 
     triggers {
@@ -78,10 +79,14 @@ pipeline {
                     echo "Changed files:\n${changedFiles}"
 
                     def frontendRelevant = changedFiles.split('\n').any { file ->
+                        file.startsWith('src/') ||
                         file.startsWith('frontend/') ||
                         file.startsWith('docker-compose') ||
                         file.startsWith('env/') ||
-                        file.startsWith('jenkins/Jenkinsfile.frontend')
+                        file.startsWith('jenkins/') ||
+                        file.startsWith('Jenkinsfile') ||
+                        file == 'package.json' ||
+                        file == 'package-lock.json'
                     }
 
                     if (!frontendRelevant && changedFiles != '') {
@@ -102,7 +107,7 @@ pipeline {
                 expression { return env.SKIP_PIPELINE != 'true' }
             }
             steps {
-                dir('frontend') {
+                dir('.') {
                     sh '''
                         docker build \
                             -f - \
@@ -132,7 +137,7 @@ DOCKERFILE
                 }
             }
             steps {
-                dir('frontend') {
+                dir('.') {
                     sh '''
                         docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run test:ci
                     '''
@@ -170,6 +175,7 @@ DOCKERFILE
                                 --build-arg VITE_API_URL=${cfg.apiUrl} \
                                 --build-arg VITE_ENVIRONMENT=${cfg.env} \
                                 --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                                --build-arg NGINX_CONFIG=default.prod.conf \
                                 -t ${IMAGE_FULL} \
                                 -t ${IMAGE_LATEST} \
                                 .
@@ -219,21 +225,27 @@ DOCKERFILE
                             cd ${REMOTE_PROJECT_DIR}
 
                             # Pull latest compose files and configs from git
-                            git pull origin ${params.TARGET_ENV} || true
+                            git pull origin main || true
 
                             # Pull new image
                             docker pull ${IMAGE_FULL}
 
                             # Update the env file with new image tag
-                            sed -i 's|DOCKER_IMAGE_TAG=.*|DOCKER_IMAGE_TAG=${IMAGE_TAG}|' env/.env.${params.TARGET_ENV}
+                            sed -i 's|DOCKER_IMAGE_TAG=.*|DOCKER_IMAGE_TAG=${IMAGE_TAG}|' .env.${params.TARGET_ENV}
 
                             # Export env vars so docker compose interpolation can read them
                             set -a
-                            source env/.env.${params.TARGET_ENV}
+                            source .env.${params.TARGET_ENV}
                             set +a
 
-                            # Graceful rolling restart — only the react service
-                            docker compose -f ${COMPOSE_FILE} up -d --no-deps --force-recreate react
+                            # Create shared network if it doesn't exist (for frontend-backend communication)
+                            docker network create lv360-shared-network 2>/dev/null || true
+
+                            # Graceful rolling restart — only the frontend service
+                            docker compose -f ${COMPOSE_FILE} up -d --no-deps --force-recreate frontend
+
+                            # Connect frontend to shared network for backend communication
+                            docker network connect lv360-shared-network lv360_frontend_dev 2>/dev/null || true
 
                             # Wait and verify
                             echo "Waiting for health check..."

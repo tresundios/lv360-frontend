@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   frontend:
-    image: navistresundios/lamviec360-frontend:dev-latest
+    image: navistresundios/lamviec360-frontend:${DOCKER_IMAGE_TAG:-dev-latest}
     container_name: lv360_frontend_dev
     restart: always
     ports:
