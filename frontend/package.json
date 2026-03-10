@@ -6,11 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "lint": "node ./node_modules/eslint/bin/eslint.js .",
+    "format": "npx prettier@3.3.3 --write .",
+    "format:check": "npx prettier@3.3.3 --check .",
     "preview": "vite preview",
-    "prepare": "husky",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "test": "vitest --run",
@@ -18,11 +17,11 @@
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
-      "prettier --write",
-      "eslint --fix"
+      "npx prettier@3.3.3 --write",
+      "node ./node_modules/eslint/bin/eslint.js --fix"
     ],
     "*.{json,css,md}": [
-      "prettier --write"
+      "npx prettier@3.3.3 --write"
     ]
   },
   "dependencies": {
