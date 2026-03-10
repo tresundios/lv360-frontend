@@ -21,7 +21,7 @@ export function HelloDbPage() {
   return (
     <Content centered>
       <div className="mx-auto max-w-lg space-y-6">
-        <h1 className="text-3xl font-bold">Hello World — DB Flow</h1>
+        <h1 className="text-3xl font-bold">Hello World — DB Flow (Super Cool)</h1>
         <p className="text-sm text-muted-foreground">
           Flow: PostgreSQL → FastAPI → React
         </p>
