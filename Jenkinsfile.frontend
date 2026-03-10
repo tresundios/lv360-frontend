@@ -116,11 +116,10 @@ pipeline {
                             -t lv360-frontend-lint:${BUILD_NUMBER} . <<'DOCKERFILE'
 FROM node:20-alpine
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY package*.json ./
 RUN npm ci --prefer-offline --no-audit
 COPY . .
 DOCKERFILE
-
                         docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run lint
                         docker run --rm lv360-frontend-lint:${BUILD_NUMBER} npm run format:check
                     '''
