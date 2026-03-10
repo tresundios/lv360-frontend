@@ -132,7 +132,17 @@ chmod +x $PROJECT_DIR/monitor-frontend.sh
 # Add to crontab for monitoring every 5 minutes
 (crontab -l 2>/dev/null; echo "*/5 * * * * $PROJECT_DIR/monitor-frontend.sh") | crontab -
 
-echo "✅ Setup completed successfully!"
+echo "🚀 Frontend deployment successful!"
+
+# Run verification script
+echo "Running deployment verification..."
+if [ -f "$PROJECT_DIR/scripts/verify-deployment.sh" ]; then
+    chmod +x $PROJECT_DIR/scripts/verify-deployment.sh
+    $PROJECT_DIR/scripts/verify-deployment.sh
+else
+    echo "⚠️  Verification script not found, skipping verification"
+fi
+
 echo ""
 echo "Next steps:"
 echo "1. Verify the deployment: curl http://localhost:3080/"

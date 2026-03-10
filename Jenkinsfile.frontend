@@ -172,6 +172,7 @@ DOCKERFILE
                         def cfg = viteConfig[params.TARGET_ENV] ?: viteConfig.dev
 
                         sh """
+                            cd frontend
                             docker build \
                                 -f Dockerfile.prod \
                                 --build-arg VITE_API_URL=${cfg.apiUrl} \
@@ -253,6 +254,19 @@ DOCKERFILE
                             echo "Waiting for health check..."
                             # Wait for container to be healthy with retry
                             timeout 60 bash -c 'until curl -f http://localhost:3080/ >/dev/null 2>&1; do sleep 2; done'
+                            
+                            # Run comprehensive verification
+                            echo "Running comprehensive deployment verification..."
+                            if [ -f "scripts/verify-deployment.sh" ]; then
+                                chmod +x scripts/verify-deployment.sh
+                                ./scripts/verify-deployment.sh
+                            else
+                                echo "⚠️  Verification script not found, running basic checks"
+                                # Basic API endpoint checks
+                                curl -f http://localhost:3080/api/hello-db || exit 1
+                                curl -f http://localhost:3080/api/hello-cache || exit 1
+                                curl -f http://localhost:3080/tasks || exit 1
+                            fi
                             echo "Frontend deployment successful!"
 ENDSSH
                     """
