@@ -146,7 +146,7 @@ DOCKERFILE
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: 'frontend/**/test-results.xml'
+                    junit allowEmptyResults: true, testResults: '**/test-results.xml'
                 }
             }
         }
@@ -171,7 +171,6 @@ DOCKERFILE
                         def cfg = viteConfig[params.TARGET_ENV] ?: viteConfig.dev
 
                         sh """
-                            cd frontend
                             docker build \
                                 -f Dockerfile.prod \
                                 --build-arg VITE_API_URL=${cfg.apiUrl} \

@@ -13,6 +13,10 @@ export default defineConfig({
     },
   },
   test: {
+    reporters: ["default", "junit"],
+    outputFile: {
+      junit: "test-results.xml",
+    },
     projects: [
       // Unit tests — lightweight, runs in jsdom (used by CI)
       {
