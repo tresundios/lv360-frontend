@@ -20,11 +20,26 @@ if [ ! -f "package.json" ]; then
 fi
 
 echo "1. Running Prettier format check..."
-if npm run format:check; then
+# Try different approaches to run prettier
+if command -v yarn >/dev/null 2>&1; then
+    FORMAT_CMD="yarn prettier --check"
+elif command -v pnpm >/dev/null 2>&1; then
+    FORMAT_CMD="pnpm prettier --check"
+else
+    FORMAT_CMD="npm run format:check"
+fi
+
+if $FORMAT_CMD . 2>/dev/null; then
     echo -e "${GREEN}✅ Prettier formatting is correct${NC}"
 else
     echo -e "${YELLOW}⚠️  Formatting issues found. Running auto-format...${NC}"
-    npm run format
+    if command -v yarn >/dev/null 2>&1; then
+        yarn prettier --write .
+    elif command -v pnpm >/dev/null 2>&1; then
+        pnpm prettier --write .
+    else
+        npm run format
+    fi
     echo -e "${GREEN}✅ Code has been auto-formatted${NC}"
     echo -e "${YELLOW}⚠️  Please review the changes and commit again${NC}"
     exit 1
