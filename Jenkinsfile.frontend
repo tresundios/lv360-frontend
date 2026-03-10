@@ -226,7 +226,7 @@ DOCKERFILE
                             cd ${REMOTE_PROJECT_DIR}
 
                             # Pull latest compose files and configs from git
-                            git pull origin main || true
+                            git pull origin ${env.GIT_BRANCH_NAME} || true
 
                             # Pull new image
                             docker pull ${IMAGE_FULL}
